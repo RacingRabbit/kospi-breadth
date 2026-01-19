@@ -8,28 +8,26 @@ from datetime import datetime
 from openai import OpenAI
 
 # =========================
-# 1. CONFIGURATION
+# CONFIGURATION
 # =========================
 MARKET = "KOSPI"
 START_DATE = "2023-01-01" 
 DISPLAY_START = "2024-01-01"
 OUTPUT_DIR = "docs"
+DATA_DIR = "docs/data"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# Initialize OpenAI Client (FIXED: Defined at the top level)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+os.makedirs(DATA_DIR, exist_ok=True)
 
 # =========================
-# 2. DATA PROCESSING
+# 1. DATA DOWNLOAD
 # =========================
-print(f"Downloading {MARKET} Data...")
+print(f"Fetching {MARKET} Tickers...")
 df_listing = fdr.StockListing(MARKET)
 tickers = df_listing["Code"].tolist()
 
 prices_dict = {}
-# Using all tickers for production
-for t in tqdm(tickers, desc="KOSPI Progress"):
+for t in tqdm(tickers, desc="Downloading Prices"):
     try:
         df = fdr.DataReader(t, START_DATE)
         if not df.empty:
@@ -39,84 +37,171 @@ for t in tqdm(tickers, desc="KOSPI Progress"):
 
 prices = pd.DataFrame(prices_dict).ffill()
 prices.index = pd.to_datetime(prices.index)
-prices_ytd = prices.loc[prices.index >= DISPLAY_START]
 
-# Prepare JSON payload
-payload = {"dates": prices_ytd.index.strftime('%Y-%m-%d').tolist()}
+# =========================
+# 2. CALCULATIONS
+# =========================
+print("Calculating Market Internals...")
 
-# Breadth Calculations
-for p in [20, 50, 200]:
+# Breadth (SMA)
+breadth_data = {}
+for p in [20, 60, 120, 200]:
     sma = prices.rolling(p).mean()
     pct = (prices > sma).sum(axis=1) / sma.count(axis=1) * 100
-    payload[f"breadth_{p}"] = pct.loc[pct.index >= DISPLAY_START].round(2).tolist()
+    breadth_data[f"above_{p}"] = pct
 
-# High/Low
-hl = (prices == prices.rolling(252).max()).sum(axis=1) - (prices == prices.rolling(252).min()).sum(axis=1)
-payload["high_low"] = hl.loc[hl.index >= DISPLAY_START].astype(int).tolist()
+breadth_df = pd.DataFrame(breadth_data)
+breadth_df.to_csv(f"{DATA_DIR}/breadth_sma.csv")
 
-# AD Line
-ad = (prices.diff() > 0).sum(axis=1) - (prices.diff() < 0).sum(axis=1)
-ad_line = ad.cumsum()
-ad_line_ytd = (ad_line - ad_line.loc[ad_line.index >= DISPLAY_START].iloc[0])
-payload["ad_line"] = ad_line_ytd.loc[ad_line_ytd.index >= DISPLAY_START].astype(int).tolist()
+# 52-Week Highs - Lows
+high_52w = prices == prices.rolling(252).max()
+low_52w = prices == prices.rolling(252).min()
+hl_df = pd.DataFrame({
+    "net": high_52w.sum(axis=1) - low_52w.sum(axis=1)
+})
+hl_df.to_csv(f"{DATA_DIR}/high_low_52w.csv")
 
-# Save JSON Data
+# Advance-Decline Line
+returns = prices.diff()
+net_adv = (returns > 0).sum(axis=1) - (returns < 0).sum(axis=1)
+ad_line = net_adv.cumsum()
+# Anchor AD Line to DISPLAY_START for the dashboard
+ad_line_display = ad_line - ad_line.loc[ad_line.index >= DISPLAY_START].iloc[0]
+
+ad_df = pd.DataFrame({"ad_line": ad_line_display})
+ad_df.to_csv(f"{DATA_DIR}/advance_decline.csv")
+
+# =========================
+# 3. SAVE JSON FOR DASHBOARD
+# =========================
+# This part ensures your index.html charts continue to work
+prices_ytd = prices.loc[prices.index >= DISPLAY_START]
+payload = {
+    "dates": prices_ytd.index.strftime('%Y-%m-%d').tolist(),
+    "breadth_20": breadth_df.loc[breadth_df.index >= DISPLAY_START, "above_20"].round(2).tolist(),
+    "breadth_50": breadth_df.loc[breadth_df.index >= DISPLAY_START, "above_60"].round(2).tolist(), # Using 60 as 50 proxy
+    "breadth_200": breadth_df.loc[breadth_df.index >= DISPLAY_START, "above_200"].round(2).tolist(),
+    "high_low": hl_df.loc[hl_df.index >= DISPLAY_START, "net"].astype(int).tolist(),
+    "ad_line": ad_df.loc[ad_df.index >= DISPLAY_START, "ad_line"].astype(int).tolist()
+}
 with open(f"{OUTPUT_DIR}/data.json", "w") as f:
     json.dump(payload, f)
 
-# =========================
-# 3. AI SUMMARY (WITH WEB SEARCH)
-# =========================
-print("Generating AI Summary with OpenAI Web Search...")
 
-# Prepare the data context
-latest_20 = payload['breadth_20'][-1]
-latest_50 = payload['breadth_50'][-1]
-latest_200 = payload['breadth_200'][-1]
+# ========================================================
+# 4. AI SUMMARY (BREADTH + NEWS) - YOUR SPECIFIC BLOCK
+# ========================================================
+print("Starting AI Analysis with Web Search...")
 
-# Prompt logic
-summary_prompt = f"""
-You are a professional market research assistant. 
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-CURRENT BREADTH DATA:
-- KOSPI Stocks above 20D SMA: {latest_20:.1f}%
-- KOSPI Stocks above 50D SMA: {latest_50:.1f}%
-- KOSPI Stocks above 200D SMA: {latest_200:.1f}%
+# --- Load latest CSV data ---
 
-YOUR TASK:
-1. Use your web search tool to find South Korean stock market news from the last 48 hours.
-2. Identify upcoming macro events (Bank of Korea, US Fed, CPI, major earnings) for the next 2 weeks.
-3. Correlate the internal breadth data with the news.
-4. Provide a report first in English, then in Korean (한국어).
-5. Use HTML tags (<b>, <p>) for formatting. Do NOT use markdown.
+# Breadth (SMA)
+breadth_df_csv = pd.read_csv(
+    f"{DATA_DIR}/breadth_sma.csv",
+    index_col=0,
+    parse_dates=True
+)
+
+latest = breadth_df_csv.iloc[-1]
+
+breadth_20 = latest["above_20"]
+breadth_60 = latest["above_60"]
+breadth_120 = latest["above_120"]
+breadth_200 = latest["above_200"]
+
+# 52-week highs / lows
+high_low = pd.read_csv(
+    f"{DATA_DIR}/high_low_52w.csv",
+    index_col=0,
+    parse_dates=True
+).iloc[-1]
+
+# Advance–decline
+ad_line_csv = pd.read_csv(
+    f"{DATA_DIR}/advance_decline.csv",
+    index_col=0,
+    parse_dates=True
+).iloc[-1]
+
+
+breadth_summary = f"""
+Percent above moving averages:
+20D: {breadth_20:.2f}%
+60D: {breadth_60:.2f}%
+120D: {breadth_120:.2f}%
+200D: {breadth_200:.2f}%
+
+52-week highs minus lows: {high_low['net']}
+Advance–Decline line (latest): {ad_line_csv['ad_line']}
 """
 
-try:
-    # Using chat.completions with the 'web_search' tool
-    # Note: If your tier doesn't support "type: web_search", 
-    # GPT-4o will still use its internal knowledge/search capability if enabled.
-    completion = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": summary_prompt}],
-        tools=[{"type": "web_search"}] if os.getenv("OPENAI_API_TIER") == "enterprise" else None
-    )
-    summary_text = completion.choices[0].message.content
-except Exception as e:
-    # Fallback if the tool call fails
-    print(f"Web search tool failed, falling back to standard completion: {e}")
-    completion = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": summary_prompt}]
-    )
-    summary_text = completion.choices[0].message.content
 
-# Save AI Summary
-with open(f"{OUTPUT_DIR}/ai_summary.html", "w", encoding="utf-8") as f:
-    f.write(f"""<div class="ai-report">
-{summary_text}
-<p style="font-size: 10px; opacity: 0.5; margin-top: 20px;">
-    Updated: {datetime.now().strftime('%Y-%m-%d %H:%M KST')}
-</p>
-</div>""")
+# --- Web search helper ---
+def get_market_news(query):
+    # Using the beta responses tool as requested
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        tools=[{"type": "web_search"}],
+        input=f"""
+Summarize the most important stock market news from the last 24 hours.
+Focus only on macro, earnings, policy, rates, or major risk events.
+Be factual. No opinions.
 
-print("Dashboard assets updated successfully.")
+Query: {query}
+"""
+    )
+    return response.output_text.strip()
+
+# --- Fetch news ---
+kr_news = get_market_news("Korean stock market news last 24 hours")
+
+# --- Final combined AI summary ---
+final_prompt = f"""
+You are a professional market research assistant.
+
+You are given:
+1) Quantitative market breadth indicators
+2) Current market news
+
+Your task:
+- Explain how the news context supports, contradicts, or explains the market internals
+- Do NOT predict prices
+- Do NOT give trading advice
+- Be concise, factual, and neutral
+- Provide an outlook for the coming weeks
+- Provide the text first in English and afterwards in Korean
+
+MARKET BREADTH DATA:
+{breadth_summary}
+
+KOREA MARKET NEWS:
+{kr_news}
+"""
+
+final_response = client.responses.create(
+    model="gpt-4.1-mini",
+    input=final_prompt
+)
+
+summary_text = final_response.output_text.strip()
+
+# --- Convert to HTML-safe format ---
+summary_html = summary_text.replace("\n", "<br>")
+
+# --- Write HTML file ---
+with open("docs/ai_summary.html", "w", encoding="utf-8") as f:
+    f.write(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: system-ui; line-height:1.6; padding:14px;">
+<h2>Daily AI Market Breadth Summary</h2>
+{summary_html}
+</body>
+</html>""")
+
+print("AI summary with market news generated successfully.")
