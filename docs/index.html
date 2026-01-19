@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KOSPI Market Health Hub</title>
+    
+    <!-- Dependencies -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Sharp" rel="stylesheet">
+
+    <style>
+        :root {
+            --surface: #f8f9ff;
+            --on-surface: #1A1C1E;
+            --card: #ffffff;
+            --brand: #3F51B5;
+            --grid: rgba(0,0,0,0.05);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --surface: #111318;
+                --on-surface: #E2E2E6;
+                --card: #1A1C1E;
+                --brand: #B1C5FF;
+                --grid: rgba(255,255,255,0.08);
+            }
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: var(--surface);
+            color: var(--on-surface);
+            transition: background-color 0.3s ease;
+        }
+
+        .m3-card {
+            background-color: var(--card);
+            border-radius: 28px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.01);
+            transition: transform 0.2s ease;
+        }
+
+        .gradient-text {
+            background: linear-gradient(90deg, #3F51B5, #7986CB);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        /* Hide scrollbars for a cleaner look */
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+        
+        .chart-min-h { min-height: 350px; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-7xl mx-auto">
+        <!-- Header Section -->
+        <header class="mb-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+                <h1 class="text-4xl font-black tracking-tight gradient-text">KOSPI BREADTH</h1>
+                <p class="text-sm font-medium opacity-50 uppercase tracking-[0.2em] mt-1">Market Breadth Monitor</p>
+            </div>
+            <div class="flex items-center gap-2 bg-white dark:bg-[#2A2D35] px-4 py-2 rounded-full shadow-sm border border-gray-100 dark:border-gray-800">
+                <span class="material-icons-sharp text-indigo-500 text-sm">update</span>
+                <span id="last-update" class="text-[10px] font-bold opacity-70 uppercase">Syncing...</span>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            
+            <!-- Main Content Area -->
+            <div class="xl:col-span-2 space-y-6">
+                
+                <!-- AI Analysis Card -->
+                <div class="m3-card border-l-4 border-indigo-500">
+                    <div class="flex items-center gap-3 mb-4">
+                        <span class="material-icons-sharp text-indigo-500">auto_awesome</span>
+                        <h2 class="text-lg font-bold tracking-tight">AI Intelligence Summary</h2>
+                    </div>
+                    <div id="ai-content" class="prose dark:prose-invert max-w-none text-sm md:text-base leading-relaxed opacity-90">
+                        Analyzing latest market internals...
+                    </div>
+                </div>
+
+                <!-- Breadth History Card -->
+                <div class="m3-card">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="font-bold opacity-80 flex items-center gap-2">
+                            <span class="material-icons-sharp text-sm">show_chart</span> SMA Breadth History
+                        </h3>
+                        <div class="flex gap-4 text-[10px] font-bold opacity-50">
+                            <span class="flex items-center gap-1"><i class="w-2 h-2 rounded-full bg-[#3F51B5]"></i> 20D</span>
+                            <span class="flex items-center gap-1"><i class="w-2 h-2 rounded-full bg-[#009688]"></i> 50D</span>
+                            <span class="flex items-center gap-1"><i class="w-2 h-2 rounded-full bg-[#FF9800]"></i> 200D</span>
+                        </div>
+                    </div>
+                    <div id="breadthChart" class="chart-min-h"></div>
+                </div>
+
+                <!-- AD Line Card -->
+                <div class="m3-card">
+                    <h3 class="font-bold mb-6 opacity-80 flex items-center gap-2">
+                        <span class="material-icons-sharp text-sm">layers</span> Advance-Decline Trend
+                    </h3>
+                    <div id="adChart" class="chart-min-h"></div>
+                </div>
+
+            </div>
+
+            <!-- Sidebar -->
+            <div class="space-y-6">
+                
+                <!-- Momentum Card -->
+                <div class="m3-card bg-indigo-600 dark:bg-indigo-900 !text-white shadow-2xl shadow-indigo-500/20">
+                    <div class="mb-4">
+                        <h3 class="font-bold text-lg">Momentum</h3>
+                        <p class="text-[10px] opacity-70 uppercase tracking-widest">52W Net Highs minus Lows</p>
+                    </div>
+                    <div id="hlChart" style="min-height: 250px;"></div>
+                </div>
+
+                <!-- Legend / Info Card -->
+                <div class="m3-card">
+                    <h3 class="font-bold text-sm mb-4 opacity-80 italic">Indicator Guide</h3>
+                    <div class="space-y-4 text-xs">
+                        <div>
+                            <p class="font-bold text-indigo-500 mb-1">SMA Breadth</p>
+                            <p class="opacity-60">The percentage of KOSPI stocks trading above their Moving Averages. Higher values indicate broad market participation.</p>
+                        </div>
+                        <div>
+                            <p class="font-bold text-indigo-500 mb-1">A-D Line</p>
+                            <p class="opacity-60">A cumulative track of daily advancing stocks minus declining stocks. Trend direction confirms index strength.</p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+        
+        <footer class="mt-12 mb-8 text-center text-[10px] font-bold opacity-30 uppercase tracking-[0.3em]">
+            KOSPI Breadth &bull; Daily Updated
+        </footer>
+    </div>
+
+    <script>
+        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const themeConfig = { mode: isDark ? 'dark' : 'light' };
+
+        async function initDashboard() {
+            try {
+                // Fetch Data and AI Summary in parallel
+                const [data, aiHtml] = await Promise.all([
+                    fetch('data.json').then(r => r.json()),
+                    fetch('ai_summary.html').then(r => r.text())
+                ]);
+
+                // Inject AI Content
+                document.getElementById('ai-content').innerHTML = aiHtml;
+                document.getElementById('last-update').innerText = `Updated: ${data.dates[data.dates.length - 1]}`;
+
+                // Global ApexChart Defaults
+                const baseOptions = {
+                    chart: {
+                        fontFamily: 'Roboto, sans-serif',
+                        toolbar: { show: false },
+                        background: 'transparent',
+                        animations: { enabled: true, speed: 800 }
+                    },
+                    dataLabels: { enabled: false }, // Critical for clean look
+                    theme: themeConfig,
+                    grid: { 
+                        borderColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+                        strokeDashArray: 4
+                    },
+                    xaxis: {
+                        type: 'datetime',
+                        categories: data.dates,
+                        labels: { 
+                            style: { colors: isDark ? '#888' : '#666', fontSize: '10px' },
+                            datetimeFormatter: { month: 'MMM' }
+                        },
+                        axisBorder: { show: false },
+                        axisTicks: { show: false }
+                    },
+                    tooltip: { theme: isDark ? 'dark' : 'light', x: { format: 'dd MMM yyyy' } }
+                };
+
+                // 1. Breadth Chart (Line)
+                new ApexCharts(document.querySelector("#breadthChart"), {
+                    ...baseOptions,
+                    stroke: { width: [3, 2, 2], curve: 'smooth' },
+                    colors: ['#3F51B5', '#009688', '#FF9800'],
+                    series: [
+                        { name: '20D SMA', data: data.breadth_20 },
+                        { name: '50D SMA', data: data.breadth_50 },
+                        { name: '200D SMA', data: data.breadth_200 }
+                    ],
+                    yaxis: { 
+                        max: 100, min: 0, tickAmount: 5,
+                        labels: { style: { colors: isDark ? '#888' : '#444' } }
+                    }
+                }).render();
+
+                // 2. AD Line (Area)
+                new ApexCharts(document.querySelector("#adChart"), {
+                    ...baseOptions,
+                    chart: { ...baseOptions.chart, type: 'area', height: 350 },
+                    series: [{ name: 'A-D Line', data: data.ad_line }],
+                    colors: ['#3F51B5'],
+                    stroke: { width: 3 },
+                    fill: { 
+                        type: 'gradient', 
+                        gradient: { shadeIntensity: 1, opacityFrom: 0.3, opacityTo: 0 } 
+                    },
+                    yaxis: { labels: { style: { colors: isDark ? '#888' : '#444' } } }
+                }).render();
+
+                // 3. Momentum Sidebar (Bar)
+                new ApexCharts(document.querySelector("#hlChart"), {
+                    ...baseOptions,
+                    chart: { ...baseOptions.chart, type: 'bar', height: 250 },
+                    series: [{ name: 'Net Highs', data: data.high_low }],
+                    colors: ['#FFFFFF'],
+                    plotOptions: {
+                        bar: {
+                            columnWidth: '85%',
+                            colors: {
+                                ranges: [{ from: -1000, to: -1, color: '#FFAB91' }] // Reddish for negative
+                            }
+                        }
+                    },
+                    xaxis: { ...baseOptions.xaxis, labels: { show: false } },
+                    yaxis: { labels: { show: false } },
+                    grid: { show: false }
+                }).render();
+
+            } catch (err) {
+                console.error("Dashboard Load Error:", err);
+                document.getElementById('ai-content').innerHTML = "<p class='text-red-500 font-bold'>Failed to load market data. Please ensure data.json exists.</p>";
+            }
+        }
+
+        initDashboard();
+    </script>
+</body>
+</html>

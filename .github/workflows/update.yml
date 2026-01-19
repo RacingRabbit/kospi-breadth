@@ -1,0 +1,35 @@
+name: Daily Market Update
+
+on:
+  schedule:
+    - cron: '0 7 * * 1-5' # 4:00 PM KST (Mon-Fri)
+  workflow_dispatch:      # Allows manual trigger
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install pandas numpy finance-datareader plotly tqdm openai
+
+      - name: Run Update Script
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python update_dashboard.py
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/*
+          git commit -m "Auto-update market data: $(date +'%Y-%m-%d')" || exit 0
+          git push
